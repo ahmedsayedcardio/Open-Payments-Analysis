@@ -1,5 +1,5 @@
 #Set folder to save figures
-folder <- "C:/Ahmed's Stuff/ResearchStuff/Open_Payments_Project/Manuscript/Revisions_JAMA/"
+folder <- write_your_folder_name_here
 
 #Combine figures 1A and 1B into a single figure (Figure 1)
 #Figure 1
