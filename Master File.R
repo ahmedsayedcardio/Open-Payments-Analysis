@@ -1,6 +1,4 @@
 ##This file acts as a master file that organizes and loads the other R files necessary to conduct this analysis
-#Set the working directory
-setwd("C:/Ahmed's Stuff/ResearchStuff/Open_Payments_Project/Drugs & Devices Payments")
 
 #Load libraries (packages necessary for the analysis)
 source("Libraries.R")
