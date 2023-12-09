@@ -9,8 +9,8 @@ wanted_cols <- c("Covered_Recipient_Profile_ID",
                  "Nature_of_Payment_or_Transfer_of_Value",
                  "Covered_Recipient_Specialty_1")
 
-#Import data for 2016-2022                                  
-files <- paste0("C:/Ahmed's Stuff/ResearchStuff/Open Payments Data/General_Payments_", seq(2016, 2022, 1), ".csv")
+#Import data for 2016-2022 (to import data, save the raw data files as "General_Payments_XXXX", where "XXXX" is the file year and fill in your directory)                                  
+files <- paste0(write_your_directory_here, "General_Payments_", seq(2016, 2022, 1), ".csv")
 
 #Read files
 x <- lapply(files, fread, select = wanted_cols, nThread = 14)
@@ -40,6 +40,7 @@ wanted_cols <- c("Physician_Profile_ID",
 files <- paste0("C:/Ahmed's Stuff/ResearchStuff/Open Payments Data/General_Payments_", seq(2013, 2015, 1), ".csv")
 
 #Read files (save into "x_old" to denote that they belong to 2013-2015 rather than newer years)
+#To import data, save the raw data files as "General_Payments_XXXX", where "XXXX" is the file year and fill in your directory.
 x_old <- lapply(files, fread, select = wanted_cols, nThread = 14)
 
 #Bind them together into a single data.table
