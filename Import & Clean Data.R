@@ -25,8 +25,8 @@ x <- foreach(file_year = seq(2013, 2022, 1),
              .packages = packs,
              .combine = "rbind") %do% {
                
-               #Set file to import
-               file <- paste0("C:/Ahmed's Stuff/ResearchStuff/Open Payments Data/General_Payments_", file_year, ".csv")
+               #Set file to import (To import the data, save your files as "General_Payments_XXXX.csv", where "XXXX" refers to the year)
+               file <- paste0(write_your_file_directory_here, "/General_Payments_", file_year, ".csv")
                
                #Read file
                x <- fread(file,
