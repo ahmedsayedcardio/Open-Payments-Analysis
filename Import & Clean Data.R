@@ -163,7 +163,7 @@ devices <- x[, 4] %>% rbindlist
 missing_specs <- x[, 5] %>% as.numeric %>% sum
 
 #Perform the check (if missing_specs > 0)
-if(missing_spec > 0) {
+if(missing_specs > 0) {
   "Some records have not been assigned to a specialty"
 } else {
   "There were no rows with missing specialties"
