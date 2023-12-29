@@ -13,7 +13,6 @@ source("Top earners per specialty (Import & Clean Data).R")
 
 
 #Designate a folder to save the output (Table & Figure)
-source("Set Folder.R")
 folder <- your_folder #Please replace "your_folder" with the required directory
 #Create the figures
 #Table 1 (Specialties)
