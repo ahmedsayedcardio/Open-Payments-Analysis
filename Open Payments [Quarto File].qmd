@@ -1,0 +1,1252 @@
+---
+title: "An Analysis of Industry Payments to US Physicians by Specialty & Product Type, 2013-2022"
+subtitle: "An Analysis of the Open Payments Database"
+format: 
+  html:
+    toc: true
+    toc-location: body
+date: 1-7-2024
+theme: lightly
+author:
+  - name: "Ahmed Sayed (asu.ahmed.sayed@gmail.com)"
+    affiliations: "Ain Shams University, Faculty of Medicine"
+embed-resources: true
+toc: true
+toc-expand: 2
+toc-title: Contents
+page-layout: full
+code-fold: true
+editor: visual
+---
+
+# Load libraries & packages needed for this analysis
+
+```{r, messages = FALSE, warning = FALSE, output = FALSE}
+#Load the packages we'll use for this work.
+packs <- c(
+"ggplot2", "doParallel", "dplyr", "tidyr", "data.table", "janitor", "readxl",
+"stringr", "stringi", "forcats", "ggsci", "ggpubr", "ggthemes", "ggh4x",
+"ggrepel",  "grid", "gridExtra", "Hmisc", "qs", "flextable", "officer")
+lapply(packs, require, character.only = TRUE)
+
+
+##Self-made (non-package) functions##
+#Function to add comma separators to large numbers
+comma <- function(x) {
+  if(!is.numeric(x)) {
+    x <- x %>% pull
+  }
+  x %>%
+    format(big.mark = ",", trim = T)
+}
+
+#Chain select and pull
+spull <- function(df, ...) {
+  df %>% dplyr::select(...) %>% pull
+}
+
+#Function to insert a single horizontal line (to separate figures)
+grid_single_horizontal <- function() {
+  vert_coords = c(0.5, 0.5)
+  hrzl_coords = c(0, 1)
+  line_id = c(1, 1)
+  grid.polygon(hrzl_coords, vert_coords, line_id, gp = gpar(lwd = 2))
+}
+
+
+#Perform some aesthetic modifications for flextables
+flextable_aes <- function(table, table_title) {
+  
+  #Table font
+  table <- flextable::font(table, fontname = "Times New Roman", part = "all")
+  
+  #Align everything centrally
+  table <- flextable::align(table, align = "center", part = "all")
+  
+  #Table heading
+  table <- flextable::set_caption(table, caption = table_title,
+                                  fp_p = fp_par(text.align = "left"))
+  
+  #Align footer to the left
+  table <- flextable::align(table, align = "left", part = "footer")
+  
+  #Bold header
+  table <- flextable::bold(table, part = "header")
+  
+  #Set Table width
+  table <- flextable::width(table, width = 1.5, unit = "in")
+  
+  #Bold
+  table <- flextable::bold(table, part = "header")
+  
+  #Print
+  table
+}
+
+#Function to insert footnote symbol in the correct order
+footnote_symbol <- function(i) {
+  footnote_symbols <- c("\U002A", "\U2020", "\U2021", "\U00A7")
+  footnote_symbols[i]
+}
+
+#Read specialties sheet (to map Health Care Provider Taxonomy codes onto 1 of 39 specialties)
+specialties <- readxl::read_xlsx("Specialties Taxonomy.xlsx")
+
+
+```
+
+# Drugs & Devices: Import data from Open Payments from 2013-2022
+
+```{r, messages = FALSE, warning = FALSE}
+##Designate wanted columns (this will speed up file importing compared to importing all columns)
+##Column names in 2016+ files are slightly different from those in 2013-2015
+#2016+ columns
+wanted_cols_2016plus <- c(
+"Total_Amount_of_Payment_USDollars",
+"Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_1",
+"Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_1", "Covered_Recipient_Specialty_1",
+"Nature_of_Payment_or_Transfer_of_Value",
+"Recipient_Country"
+)
+#2013-2015 columns
+wanted_cols_2013_to_2015 <- c(
+"Total_Amount_of_Payment_USDollars",
+"Nature_of_Payment_or_Transfer_of_Value", "Name_of_Associated_Covered_Drug_or_Biological1",
+"Name_of_Associated_Covered_Device_or_Medical_Supply1",
+"Recipient_Country",
+"Physician_Specialty")
+
+#Paste them together and deduplicate common column names
+wanted_cols <- c(wanted_cols_2016plus, wanted_cols_2013_to_2015) %>% unique
+
+#Run foreach loop from 2013-2022
+x <- foreach(file_year = seq(2013, 2022, 1),
+             .packages = packs,
+             .combine = "rbind") %do% 
+{
+               
+#Set file to import
+file <- paste0("General_Payments_", file_year, ".csv")
+
+#Read file
+x <- fread(file,
+select = wanted_cols,
+nThread = 14)
+
+#Clean names to make them easier to reference
+x <- clean_names(x)
+
+#Rename columns to make them easier to reference
+x <- x %>%
+rename(any_of(c(
+##This will rename the column corresponding to the primary (first-mentioned) item for which the payment was made
+#For 2016+
+name = "name_of_drug_or_biological_or_device_or_medical_supply_1",
+#For 2013-2015 (drugs/device names are in different columns)
+drug_name = "name_of_associated_covered_drug_or_biological1",
+device_name = "name_of_associated_covered_device_or_medical_supply1",
+##This will rename the column stating whether the primary item is a drug or device
+#For 2016+ only since 2013-2015 have different columns for drugs/devices
+object_type = "indicate_drug_or_biological_or_device_or_medical_supply_1",
+##This will rename the specialties column
+#For 2016+
+specialty = "covered_recipient_specialty_1",
+#For 2013-2015
+specialty = "physician_specialty",
+##This will rename the column stating the amount in USD
+#Same name for both 2013-2015 and 2016+
+amount = "total_amount_of_payment_us_dollars",
+#Same name for both 2013-2015 and 2016+
+payment_nature = "nature_of_payment_or_transfer_of_value",
+##This will rename the country of the recipient
+country = "recipient_country"
+)))
+
+#Filter to MDs/DOs (Allopathic/Osteopathic physicians)
+x <- x %>% filter(specialty %>% stri_detect_fixed("Allopathic & Osteopathic Physicians"))
+
+#Filter to those in the US
+x <- x %>% filter(country == "United States")
+
+#Remove ownership/investment interest (not a category of General Payments)
+x <- x %>%
+filter(payment_nature != "Current or prospective ownership or investment interest")
+
+#Set aside payment categories applicable from 2021 onwards only
+x <- x %>% filter(payment_nature != "Acquisitions" &
+payment_nature != "Debt Forgiveness" &
+payment_nature != "Debt forgiveness" &
+payment_nature != "Long-term medical supply or device loan" &
+payment_nature != "Long term medical supply or device loan" &
+payment_nature != "Space rental or facility fees (teaching hospital only)")
+
+#Exclude royalty/licensing fees
+x <- x %>% filter(payment_nature != "Royalty or License")
+
+
+##Run code to import drug/device payments for 2016+
+if(file_year >= 2016) {
+#Group payments by primary drug (first mentioned)
+drugs <- x %>% 
+filter(object_type %in% c("Drug", "Biological")) %>% #Filter to drugs (includes biologics)
+mutate(name = toupper(name)) %>% #This will capitalize all words of the name (to group in a case-insensitve manner)
+group_by(name) %>% #Group by drug
+summarise(amount = sum(amount)) #Calculate totals per drug
+
+#Group payments by primary device (first mentioned)
+devices <- x %>% 
+filter(object_type == "Device") %>% #Filter to devices
+mutate(name = toupper(name)) %>% #This will capitalize all words of the name (to group in a case-insensitve manner)
+group_by(name) %>% #Group by device
+summarise(amount = sum(amount)) #Calculate totals per device
+}
+
+
+##Run code to import drug/device payments for 2016+
+if(file_year %between% c(2013, 2015)) {
+drugs <- x %>% 
+filter(drug_name != "") %>% #Filter to drugs (anything that does not have a blank in the drug column; includes biologics)
+mutate(name = toupper(drug_name)) %>% #This will capitalize all words of the name (to group in a case-insensitve manner)
+group_by(drug_name) %>% #Group by drug
+summarise(amount = sum(amount)) %>% #Calculate totals per drug
+rename(name = drug_name) #To make column names compatible with the 2016+ data
+
+#Get devices
+devices <- x %>% 
+filter(device_name != "") %>% #Filter to devices (anything that does not have a blank in the device column)
+mutate(name = toupper(device_name)) %>% #This will capitalize all words of the name (to group in a case-insensitve manner)
+group_by(device_name) %>% #Group by device
+summarise(amount = sum(amount)) %>% #Calculate totals per drug
+rename(name = device_name) #To make column names compatible with the 2016+ data
+
+}
+               
+#Create a list containing the relevant items
+list(drugs, devices)
+}
+
+
+#Save the imported data
+qsave(x, file = "OP Data (Drugs & Devices).RData")
+##Use rbindlist to create dataframes from the list elements in the data.table
+#Create a drugs data.table (payments for each drug)
+drugs <- x[, 1] %>% rbindlist
+#Create a devices data.table (payments for each device)
+devices <- x[, 2] %>% rbindlist
+#Remove x to free up memory
+rm(x)
+```
+
+# Specialties: Import data designating primary specialties
+
+```{r, messages = FALSE, warning = FALSE}
+#Designate the names of columns in the NPPES file which have the primary switch indicator
+tax_switch_cols <- paste0("Healthcare Provider Primary Taxonomy Switch_", 1:15)
+#Import them
+npi_tax_switch <- fread("NPI File.csv",
+                  nThread = 16, 
+                  select = tax_switch_cols)
+                    
+
+#Replace column names by something easier to reference
+colnames(npi_tax_switch) <- colnames(npi_tax_switch) %>%
+  str_replace(pattern = "Healthcare Provider Primary Taxonomy Switch",
+              replacement = "switch")
+
+#Set columns to loop over
+tax_switch_cols <- paste0("switch_", 1:15)
+
+#Declare the primary index column
+npi_tax_switch[, primary_index := NA_integer_]
+#Start a for loop to replace the NAs in the primary_index column with the index of the
+#column which has the primary switch turned on
+for(switch_col in tax_switch_cols) {
+  npi_tax_switch[, primary_index := fifelse(get(switch_col) == "Y",
+                                            which(colnames(npi_tax_switch) == switch_col),
+                                            primary_index)]
+  }
+
+#Save the output and remove the data.table
+primary_index <- npi_tax_switch[, primary_index]
+rm(npi_tax_switch)
+
+#Designate the names of columns in the NPPES file which have the specialty code
+sp_codes_cols <- paste0("Healthcare Provider Taxonomy Code_", 1:15)
+#Import them
+npi_sp_codes <- fread("NPI File.csv",
+nThread = 16, 
+select = sp_codes_cols)
+
+
+#Replace missings with 1 (Assume that, if there's no clear yes, the first written specialty is the primary one)
+primary_index[is.na(primary_index)] <- 1
+
+#Create primary index column in specialties data.table
+npi_sp_codes[, primary_index_column := primary_index]
+
+#Run a for loop to assign over indices 1 to 15
+for(given_index in 1:15) {
+npi_sp_codes[primary_index_column == given_index, 
+             primary_specialty := get(paste0("Healthcare Provider Taxonomy Code_", given_index))]
+}
+
+#Save the output and remove the data.table
+primary_specialties <- npi_sp_codes[, primary_specialty]
+rm(npi_sp_codes)
+```
+
+# Specialties: Import NPPES Data & link it to specialty data
+
+```{r, messages = FALSE, warning = FALSE}
+#Now, we'll try to match those providers using the NPI file
+#Import NPI data
+npi_data <- fread("NPI File.csv",
+nThread = 16, 
+select = c(
+"NPI", 
+"Replacement NPI",
+"Provider First Name",
+"Provider Middle Name",
+"Provider Last Name (Legal Name)",
+"Provider Name Suffix Text",
+"Provider Business Practice Location Address Postal Code",
+"Provider First Line Business Practice Location Address",
+"Provider Second Line Business Practice Location Address",
+"NPI Deactivation Date",
+"Provider Enumeration Date",
+"Provider Business Practice Location Address Country Code (If outside U.S.)"
+)
+)
+
+#Rename columns in NPI
+npi_data <- npi_data %>% rename(any_of(c(
+  npi = "NPI",
+  replacement_npi = "Replacement NPI",
+  first_name =  "Provider First Name",
+  middle_name =  "Provider Middle Name",
+  last_name = "Provider Last Name (Legal Name)",
+  suffix = "Provider Name Suffix Text",
+  address_p1 = "Provider First Line Business Practice Location Address",
+  address_p2 = "Provider Second Line Business Practice Location Address",
+  zip_code = "Provider Business Practice Location Address Postal Code",
+  deact_date = "NPI Deactivation Date",
+  start_date = "Provider Enumeration Date",
+  outside_us_country_code = "Provider Business Practice Location Address Country Code (If outside U.S.)"
+)))
+
+#Assign primary specialty column
+npi_data[, specialty_code := primary_specialties]
+
+#Filter to physicians
+npi_data <- npi_data[grepl(pattern = "^20", x = specialty_code)]
+
+#Convert dates columns to date format
+npi_data[, deact_date := deact_date %>% as.Date("%m/%d/%Y")]
+npi_data[, start_date := start_date %>% as.Date("%m/%d/%Y")]
+
+#With respect to deactivatoin date, keep only NPIs that were either not deactivated at all or that were deactivated only after the start of data collection
+npi_data <- npi_data[deact_date > "2013-08-01" | is.na(deact_date)]
+#Remove NPIs that were activated after the end of 2022
+npi_data <- npi_data[!start_date > "2023-01-01"]
+
+#Filter to physicians in the US (all US zip codes must be 5/9 characters)
+npi_data <- npi_data[outside_us_country_code == "US"]
+# npi_data <- npi_data[(zip_code %>% nchar) %in% c(5, 9)]
+
+#N of total physicians
+total_physicians_n <- npi_data[, .N]
+
+#NPI-data physicians mostly have 5 or 9-digit zip codes. We will extract
+#The first 5 digits of 9-digit zip codes
+npi_data[, zip_code_5 := substr(zip_code, start = 1, stop = 5)]
+npi_data[, zip_code := NULL]
+
+#Merge specialties with NPI data
+npi_data <- merge(
+npi_data, 
+specialties %>% select(specialty_code, specialty, sp_full),
+by = "specialty_code"
+)
+
+#Save
+qsave(npi_data, "NPI Data (before merging).RData")
+```
+
+# Specialties: Import 2015-2022 data from Open Payments
+
+```{r, messages = FALSE, warning = FALSE}
+##NOTE: This code is partitioned into a section for the 2016-2022 data. and a section for the 2015 data. This was necessary because of slightly different column-naming schemes.
+
+
+##2016-2022:
+#Designate wanted columns for 2016-2022 (faster compared to importing entire file)
+wanted_cols <- c(
+"Covered_Recipient_NPI", 
+"Total_Amount_of_Payment_USDollars",
+"Indicate_Drug_or_Biological_or_Device_or_Medical_Supply_1",
+"Number_of_Payments_Included_in_Total_Amount",
+"Nature_of_Payment_or_Transfer_of_Value",
+"Covered_Recipient_Specialty_1",
+"Recipient_Country",
+"Program_Year")
+
+#Import data for 2016-2022                                  
+files <- paste0("General_Payments_", seq(2016, 2022, 1), ".csv")
+
+#Read files
+x <- lapply(files, fread, select = wanted_cols, nThread = 16)
+
+#Bind them together into a single data.table
+x <- rbindlist(x)
+
+#Clean names to make them easier to reference
+x <- clean_names(x)
+
+#Rename
+x <- x %>% rename(
+any_of(c(
+npi = "covered_recipient_npi",
+country = "recipient_country",
+specialty = "covered_recipient_specialty_1",
+object_type = "indicate_drug_or_biological_or_device_or_medical_supply_1",
+amount = "total_amount_of_payment_us_dollars",
+payments_n = "number_of_payments_included_in_total_amount",
+payment_nature = "nature_of_payment_or_transfer_of_value",
+year = "program_year"
+)
+))
+
+#Set aside types of payments deemed irrelevant for the analysis & filter to MDs/DOs
+x <- x %>% filter(
+payment_nature != "Royalty or License" & 
+payment_nature != "Acquisitions" &
+payment_nature != "Debt Forgiveness" &
+payment_nature != "Debt forgiveness" &
+payment_nature != "Long-term medical supply or device loan" &
+payment_nature != "Long term medical supply or device loan" &
+payment_nature != "Current or prospective ownership or investment interest" &
+payment_nature != "Space rental or facility fees (teaching hospital only)" &
+stri_detect_fixed(specialty, "Allopathic & Osteopathic Physicians") &
+country == "United States"
+)
+
+#Remove the specialties column now that you've used it to filter (you will add specialties later on using the NPI file)
+x[, specialty := NULL]
+#And country (since you've also already filtered by it)
+x[, country := NULL]
+#Indicate if payment was made in relation to a medical product
+#Anything that does not have a blank to it
+x[, product_related := fifelse(object_type != "", "Yes", "No")]
+#And then remove the object type column
+x[, object_type := NULL]
+
+
+##2015:
+#Designate wanted columns for 2013-2015 (faster compared to importing entire file)
+wanted_cols <- c(
+"Physician_NPI",
+"Total_Amount_of_Payment_USDollars",
+"Number_of_Payments_Included_in_Total_Amount",
+"Nature_of_Payment_or_Transfer_of_Value",
+"Physician_Specialty",
+"Recipient_Country",
+"Program_Year",
+"Name_of_Associated_Covered_Drug_or_Biological1", "Name_of_Associated_Covered_Device_or_Medical_Supply1"
+)
+
+#Import data for 2013-2015                                
+file <- paste0("General_Payments_", 2015, ".csv")
+
+#Read files (save into "x_old" to denote that they belong to 2013-2015 rather than newer years)
+x_2015 <- fread(file,
+                nThread = 16,
+                select = wanted_cols)
+
+#Clean names to make them easier to reference
+x_2015 <- clean_names(x_2015)
+
+#Rename
+x_2015 <- x_2015 %>%
+rename(any_of(c(
+npi = "physician_npi",
+country = "recipient_country",
+specialty = "physician_specialty",
+amount = "total_amount_of_payment_us_dollars",
+payments_n = "number_of_payments_included_in_total_amount",
+payment_nature = "nature_of_payment_or_transfer_of_value",
+drug = "name_of_associated_covered_drug_or_biological1",
+device = "name_of_associated_covered_device_or_medical_supply1",
+year = "program_year"
+)))
+
+
+#Set aside types of payments deemed irrelevant for the analysis & filter to MDs/DOs
+x_2015 <- x_2015 %>% filter(
+payment_nature != "Royalty or License" & 
+payment_nature != "Acquisitions" &
+payment_nature != "Debt Forgiveness" &
+payment_nature != "Debt forgiveness" &
+payment_nature != "Long-term medical supply or device loan" &
+payment_nature != "Long term medical supply or device loan" &
+payment_nature != "Current or prospective ownership or investment interest" &
+payment_nature != "Space rental or facility fees (teaching hospital only)" &
+stri_detect_fixed(specialty, "Allopathic & Osteopathic Physicians") &
+country == "United States"  
+)
+
+#Remove the specialties column now that you've used it to filter (you will add specialties later on using the NPI file)
+x_2015[, specialty := NULL]
+#And country (since you've also already filtered by it)
+x_2015[, country := NULL]
+#Indicate if payment was made in relation to a medical product
+#Anything that does not have a blank to it
+x_2015[, product_related := fifelse(drug != "" | device != "", "Yes", "No")]
+#And then remove the object type column
+x_2015[, drug := NULL]
+x_2015[, device := NULL]
+
+#Bind the 2015 and 2016-2022 data
+x <- bind_rows(x_2015, x)
+
+#Save the 2015-2022 data
+qsave(x, "Specialists (2015-2022).RData")
+```
+
+# Specialties: Import 2013-2014 data from Open Payments (NPIs not provided; will link them later)
+
+```{r, messages = FALSE, warning = FALSE}
+
+##2013-2014:
+#Designate wanted columns for 2013-2014 (faster compared to importing entire file)
+#We will have to import more columns than for the other files in order to retrieve as many NPIs as possible
+wanted_cols <- c(
+"Physician_Profile_ID", 
+"Physician_First_Name",
+"Physician_Middle_Name",
+"Physician_Last_Name",
+"Physician_Name_Suffix",
+"Recipient_Zip_Code",
+"Total_Amount_of_Payment_USDollars",
+"Nature_of_Payment_or_Transfer_of_Value",
+"Number_of_Payments_Included_in_Total_Amount",
+"Physician_Specialty",
+"Recipient_Primary_Business_Street_Address_Line1",
+"Recipient_Primary_Business_Street_Address_Line2",
+"Name_of_Associated_Covered_Drug_or_Biological1", "Name_of_Associated_Covered_Device_or_Medical_Supply1",
+"Recipient_Country",
+"Program_Year")
+
+#Import data for 2013-2014                                
+files <- paste0("General_Payments_", seq(2013, 2014, 1), ".csv")
+
+#Read files (save into "x_old" to denote that they belong to 2013-2014 and therefore do not have NPIs rather than newer years)
+x_old <- lapply(files, fread,  select = wanted_cols, nThread = 16)
+
+#Bind them together into a single data.table
+x_old <- rbindlist(x_old)
+
+#Clean names to make them easier to reference
+x_old <- clean_names(x_old)
+
+#Rename
+x_old <- x_old %>%
+rename(any_of(c(
+id = "physician_profile_id",
+first_name = "physician_first_name",
+middle_name = "physician_middle_name",
+last_name = "physician_last_name",
+suffix = "physician_name_suffix",
+zip_code = "recipient_zip_code",
+country = "recipient_country",
+specialty = "physician_specialty",
+amount = "total_amount_of_payment_us_dollars",
+year = "program_year",
+drug = "name_of_associated_covered_drug_or_biological1",
+device = "name_of_associated_covered_device_or_medical_supply1",
+payments_n = "number_of_payments_included_in_total_amount",
+year = "program_year",
+payment_nature = "nature_of_payment_or_transfer_of_value",
+address_p1 = "recipient_primary_business_street_address_line1",
+address_p2 = "recipient_primary_business_street_address_line2"
+)))
+
+#Set aside types of payments deemed irrelevant for the analysis & filter to MDs/DOs
+x_old <- x_old %>% filter(
+payment_nature != "Royalty or License" & 
+payment_nature != "Acquisitions" &
+payment_nature != "Debt Forgiveness" &
+payment_nature != "Debt forgiveness" &
+payment_nature != "Long-term medical supply or device loan" &
+payment_nature != "Long term medical supply or device loan" &
+payment_nature != "Space rental or facility fees (teaching hospital only)" &
+payment_nature != "Current or prospective ownership or investment interest" &
+stri_detect_fixed(specialty, "Allopathic & Osteopathic Physicians") &
+country == "United States")
+
+#Indicate if payment was made in relation to a medical product
+#Anything that does not have a blank to it
+x_old[, product_related := fifelse(drug != "" | device != "", "Yes", "No")]
+#And then remove the object type column
+x_old[, drug := NULL]
+x_old[, device := NULL]
+
+#Merge with the specialties sheet (since you'll be matching x_old with npi_data using the specialties column as well as others)
+x_old <- merge(x_old, specialties,
+by = "specialty",
+all.x = TRUE, all.y = FALSE)
+```
+
+# Specialties: Link 2013-2014 data to NPI from the Supplementary Open Payments file
+
+```{r, messages = FALSE, warning = FALSE}
+#Set wanted column names for file on provider info
+wanted_cols_po <- .q(Covered_Recipient_Profile_ID, 
+                     Covered_Recipient_NPI)
+
+#Import Supplemental file on provider info
+provider_info <- fread("Provider_Info.csv",
+                       nThread = 16,
+                       select = wanted_cols_po)
+
+#Rename IDs and NPI columns
+provider_info <- provider_info %>% rename(any_of(c(
+  id = "Covered_Recipient_Profile_ID",
+  npi = "Covered_Recipient_NPI"
+)))
+
+#Match to add NPI from the supplementary file
+x_old <- merge.data.table(x_old, provider_info[, .(id, npi)],
+                 all.x = TRUE, all.y = FALSE,
+                 by = "id")
+
+#See N of physicians that were in x_old but not in provider_info
+n_not_in_provider_info <- x_old[is.na(npi), id] %>% uniqueN
+
+#Store them in a separate object
+x_old_missing <- x_old[is.na(npi), ]
+x_old <- x_old[!is.na(npi), ]
+```
+
+# Specialties: Link 2013-2014 data to NPI from the NPPES file
+
+```{r, warning = FALSE, message = FALSE}
+#Remove extra "-" separating the first 5 and last 4 zipcode letters
+x_old_missing[, zip_code := zip_code %>% str_remove("-")]
+
+#Create 5-digit zip codes column and remove the old one
+x_old_missing[, zip_code_5 := substr(zip_code, start = 1, stop = 5)]
+x_old_missing[, zip_code := NULL]
+
+#Convert the street addresses in the OP file to upper case (to make it similar to the NPI file)
+x_old_missing[, address_p1 := toupper(address_p1)]
+x_old_missing[, address_p2 := toupper(address_p2)]
+
+#Remove NPI from x_old_missing (they're all NAs)
+x_old_missing[, npi := NULL]
+
+
+#See how many IDs were missing their NPI before starting out and successively after each merge
+originally_missing <- x_old_missing[, id] %>% uniqueN
+#Merge by address
+x_old_missing <- left_join(x_old_missing, npi_data[, .SD, .SDcols = c(
+"first_name", 
+"middle_name",
+"last_name",
+"suffix",
+"address_p1",
+"sp_full",
+"npi")],
+by = c(
+"first_name", 
+"middle_name",
+"last_name",
+"suffix",
+"address_p1",
+"sp_full"
+))
+
+#Merge to self such that all rows which share the same ID get given the same NPI
+x_old_missing <- left_join(x_old_missing %>% select(-npi),
+x_old_missing %>% 
+filter(!is.na(npi)) %>%
+select(npi, id) %>%
+unique,
+by = "id"
+)
+
+
+#Merge by zip_code (5-digits)
+x_old_missing <- left_join(x_old_missing, npi_data[, .SD, .SDcols = c(
+"first_name", 
+"middle_name",
+"last_name", 
+"suffix",
+"zip_code_5",
+"sp_full",
+"npi")],
+by = c("first_name", 
+"middle_name",
+"last_name", 
+"suffix",
+"zip_code_5",
+"sp_full"))
+
+#Recreate a single NPI column
+x_old_missing[, npi := fifelse(!is.na(npi.x), npi.x,
+fifelse(!is.na(npi.y), npi.y, NA_integer_))]
+x_old_missing[, npi.x := NULL]
+x_old_missing[, npi.y := NULL]
+
+#Merge to self such that all rows which share the same ID get given the same NPI
+x_old_missing <- left_join(x_old_missing %>% select(-npi),
+x_old_missing %>% 
+filter(!is.na(npi)) %>%
+select(npi, id) %>%
+unique,
+by = "id"
+)
+
+#Get N of people who could and couldn't be matched
+non_matched_ids_n <- x_old_missing[is.na(npi), id] %>% uniqueN
+matched_ids_n <- x_old_missing[!is.na(npi), id] %>% uniqueN
+```
+
+# Merge the 2013-2014 datasets (add the ones that were missing their NPI back)
+
+```{r, message = FALSE, warning = FALSE}
+#First, remove the newly added zip_code_5 column to make their columns compatible
+x_old_missing[, zip_code_5 := NULL]
+
+#Now, bind them together
+x_old <- bind_rows(x_old, x_old_missing)
+
+#Remove their redundant columns that were only added to facilitate retrieval of missing NPIs
+x_old <- x_old[, c("npi","year", "product_related", "amount", "payment_nature", "payments_n")]
+
+#Save the data
+qsave(x_old, "Specialties (2013-2014).RData")
+```
+
+# Specialties: Merge the 2013-2014 and 2015-2022 datasets
+
+```{r, messages = FALSE, warning = FALSE}
+#Bind together the 2014-2014 data in x_old with the 2015-2022 data in x
+x <- bind_rows(x_old, x)
+#Save output
+qsave(x, "Specialties (2014-2022).RData")
+
+#Get total number of records of payments to physicians from 2015 to 2022
+total_payment_records <- x[, .N] %>% comma
+missing_npi_records <- x[is.na(npi), .N] %>% comma
+non_matched_npi_records <- x[!is.na(npi) & npi %nin% npi_data[, npi], .N] %>% comma
+
+```
+
+# Specialties: Analyze Specialties
+
+```{r, messages = FALSE, warning = FALSE}
+##First, filter X to non-missing NPIs and NPIs present in the NPPES
+x <- x[!is.na(npi) & npi %in% npi_data[, npi]]
+
+#Clarify what % of payments to physicians was associated with a drug or device
+product_related_division <- x[, .(payments_n = sum(payments_n)),
+                              by = product_related] %>%
+  mutate(prop = round(100*payments_n/sum(payments_n), 2))
+
+
+#Now, collapse X by NPI, payment nature, and year
+x <- x[, .(payments_n = sum(payments_n),
+      amount = sum(amount)),
+  by = .(npi, payment_nature, year)]
+x[, npi := as.character(npi)]
+npi_data[, npi := as.character(npi)]
+#Now, match this to the NPIs dataframe
+x <- merge.data.table(npi_data[, .SD, .SDcols = c("npi", "sp_full")],
+                      x,
+                      by = "npi",
+                      all.x = TRUE, all.y = TRUE)
+
+#Save x merged with npi_data
+qsave(x, "x merged with npi_data.RData")
+
+#Remove NPI data to save on memory
+# rm(npi_data)
+
+#Convert any missing amount or payments_n to NA
+x[, amount := fifelse(is.na(amount), 0, amount)]
+x[, payments_n := fifelse(is.na(payments_n), 0, payments_n)]
+
+#Group by year and specialty
+amount_year <- x[, .(amount = sum(amount)), by = .(year)]
+
+#Get N of physicians receiving payments by year
+physicians_paid_by_year <- x[, .(paid = sum(amount > 0)),
+                             by = .(npi, year)
+                             ][, .(physicians_paid_n = sum(paid > 0)),
+                                                by = year]
+physicians_paid_by_year <- physicians_paid_by_year[!is.na(year)]
+
+#Save the N of physicians receiving payments by year (reviewer request)
+physicians_paid_by_year %>%
+  arrange(year) %>%
+  mutate(physicians_paid_n = physicians_paid_n %>% comma,
+         year = as.character(year)) %>%
+  rename("Number of physicians receiving any payment" = physicians_paid_n,
+         Year = year) %>%
+  flextable %>%
+  width(x = ., j = 1, width = 1) %>%
+  width(x = ., j = 2, width = 3.5) %>%
+  align(align = "center", part = "all") %>%
+  border_inner() %>%
+  border_outer() %>%
+  save_as_docx(path = "Paid physicians per year.docx")
+
+#Group by nature of payment
+nature_payments <- x[, .(amount = sum(amount)), by = .(payment_nature)]
+
+#Coalesce non-consulting fees
+nature_payments$payment_nature <- nature_payments$payment_nature %>%
+  str_replace("Compensation for serving as faculty or as a speaker for a non-accredited and noncertified continuing education program|Compensation for serving as faculty or as a speaker for a medical education program|Compensation for services other than consulting, including serving as faculty or as a speaker at a venue other than a continuing education program|Compensation for serving as faculty or as a speaker for an accredited or certified continuing education program", 
+              "Non-Consulting Fees")
+
+#Filetr out the NA payment nature
+payment_nature <- nature_payments %>%
+  group_by(payment_nature) %>%
+  summarise(amount = sum(amount)) %>%
+  filter(!is.na(payment_nature))
+
+#Save the division of payment types as a word document (reviewer request)
+payment_nature %>%
+  arrange(-amount) %>%
+  mutate("Proportion (%)" = round(100*amount/sum(amount), 2)) %>%
+  rename("Nature of payment" = payment_nature,
+         "Amount ($)" = amount) %>%
+  flextable %>%
+  width(x = ., width = 2) %>%
+    border_inner() %>%
+  border_outer() %>%
+  save_as_docx(path = "Payment Nature Table.docx")
+
+#Now that we've used the year and nature of payment columns, we'll group by NPI
+#Now, collapse X by NPI, payment nature, and year
+x <- x[, .(payments_n = sum(payments_n),
+           amount = sum(amount)
+      ),
+  by = .(npi, sp_full)]
+
+##Calculate:
+#Total amount received
+total_amount <- x[,sum(amount)]
+#Total N of payments
+total_payments <- x[,sum(payments_n)]
+#Total N of physicians available
+total_physicians <- x[,.N]
+#N of top 0.1% physicians
+top_physciains_n <- x[,round(uniqueN(npi) * 0.001, 0)]
+#Amount to the median physician
+median_amount <- x[, median(amount)]
+#Quantiles
+q_amount <- x[, quantile(amount, c(0.25, 0.5, 0.75))] %>% round(0)
+#Avg Payment to top 0.1% of physicians
+top_amount <- x[,sum(amount[rank(desc(amount)) <= round(0.001 * .N, 0)])/top_physciains_n]
+#Total N of physicians receiving payments
+total_physicians_receiving_payments <- x[amount > 0, .N]
+#Proportion of physician receiving payments
+total_physicians_receiving_payments_prop <- round(100*(x[amount > 0, .N]/x[,.N]), 1)
+
+#Group by specialty and top earners
+sp_data <- x[,
+             .(amount = sum(amount),
+               physicians_total_n = .N,
+               physicians_paid_n = sum(amount > 0),
+               physicians_paid_prop = round(100*(sum(amount > 0)/.N), 1),
+               median_iqr = paste0(round(median(amount), 0), " (", round(quantile(amount, 0.25), 0), " to ", round(quantile(amount, 0.75), 0), ")"),
+               top0.1_physicians_n = round(.N * 0.001, 0),
+               top0.1mean = sum(amount[rank(desc(amount)) <= round(0.001 * .N, 0)])/(round(0.001 * .N, 0))
+               ),
+             by = sp_full]
+
+#Save
+qsave(sp_data, "Specialties Data.RData")
+```
+
+# Create the Table
+
+```{r, message = FALSE, warning = FALSE}
+
+#Arrange by amount received and round
+sp_table <- sp_data %>% 
+  arrange(-amount) %>%
+  mutate(top0.1mean = round(top0.1mean, 0)) %>%
+  select(sp_full, physicians_total_n, physicians_paid_n,
+         physicians_paid_prop, amount, median_iqr, top0.1mean)
+
+#Replace the neuropsych label
+sp_data$sp_full <- sp_data$sp_full %>% str_replace ("Neuropsychiatry", "Neurologists & Psychiatrists")
+
+#Add overalls to the last row
+sp_table <- add_row(sp_table, 
+        .after = nrow(sp_data),
+        sp_full = "Overall",
+        amount = total_amount,
+        physicians_total_n = total_physicians,
+        physicians_paid_n = total_physicians_receiving_payments,
+        median_iqr = paste0(q_amount[2], " (", q_amount[1], " to ", q_amount[3], ")") %>% str_squish,
+        physicians_paid_prop = total_physicians_receiving_payments_prop,
+        top0.1mean = top_amount
+        )
+
+#Convert to a flextable "t"
+t <- flextable(sp_table)
+
+#Apply appropriate labels
+t <- set_header_labels(t, values = list(
+  sp_full = "Specialty",
+  physicians_total_n = "Total physicians, No.",
+  amount = "Total amount paid, $",
+  median_iqr = "Amount paid to the median physician, $ (IQR)",
+  physicians_paid_n = "Physicians receiving payments, No.",
+  physicians_paid_prop = "Physicians receiving payments (%)",
+  top0.1mean = "Mean amount paid to the top 0.1% of recipients, $"
+))
+
+
+#Create table borders
+t <- border_inner(t)
+t <- border_outer(t)
+
+#Bold first column
+t <- bold(t, j = 1)
+
+#Add a footnnote to state that specialties were coalesced
+t <- footnote(t, j = 1, 
+              i = 1, 
+              part = "header", 
+              ref_symbols = footnote_symbol(1),
+              value = as_paragraph("The 231 distinct categories identified in the Open Payments & National Plan and Provider Enumeration System databases were coalesced into 39 specialties to facilitate interpretation.")
+)
+
+
+#Add a footnnote to explain what the "Other" category includes
+t <- footnote(t, j = 1, i = which(sp_data$sp_full == "Other") - 1, 
+              ref_symbols = footnote_symbol(2),
+              value = as_paragraph("The 'Other' category includes those classified by Open Payments as internal medicine physicians with a subspecialty of sports medicine, obesity medicine, integrative medicine, sleep medicine, electrodiagnostic medicine, addiction medicine, adolescent medicine, hospice and palliative medicine, hypertension specialists, and magnetic resonance imaging. It also includes those practicing legal medicine, neuromusculoskeletal medicine, phlebology, independent medical examiners, clinical pharmacists, geneticists, and pain medicine (not specified under another specialty such as anesthesia or physical & rehabilitative medicine). Additionally, it also includes surgeons with subspecialties in oral & maxillofacial surgery, hospice and palliative medicine, hand surgery, surgical critical care, and transplant surgery. These specialties generally had a low number of physicians in each category and could not readily be grouped alongside any of the other 38 specialties herein.")
+)
+
+
+
+#Apply some aesthetics to make the table more visually appropriate
+t <- flextable_aes(t, table_title = "Table. Industry payments to physicians, overall and by specialty. August 2013 to December 2022")
+
+#Decrease fontsize
+t <- fontsize(t, size = 10, part = "all")
+#Desigante column width
+t <- width(t, width = 1.1)
+
+#Save table
+save_as_docx(t, path = paste0("Table_.docx"))
+```
+
+# Create Figure 1A (Drugs)
+
+```{r, fig.width = 16, fig.height = 9,  message = FALSE, warning = FALSE}
+#Scale down the size of the figure (to fit it into a 2-figure panel)
+scale_down = 2
+
+#This will unify drug names that may be referred to using more than a single term
+drugfig_df <- drugs %>%
+  mutate(name = case_when(
+  str_detect(name, "(?i)Xarelto") ~ "Xarelto",
+  str_detect(name, "(?i)Entresto|(?i)lcz696") ~ "Entresto",
+  str_detect(name, "(?i)Eliquis") ~ "Eliquis",
+  str_detect(name, "(?i)Jardiance") ~ "Jardiance",
+  str_detect(name, "(?i)Praluent") ~ "Praluent",
+  str_detect(name, "(?i)Vascepa") ~ "Vascepa",
+  str_detect(name, "(?i)Brilinta") ~ "Brilinta",
+  str_detect(name, "(?i)Farxiga") ~ "Farxiga",
+  str_detect(name, "(?i)Pradaxa") ~ "Pradaxa",
+  str_detect(name, "(?i)Corlanor") ~ "Corlanor",
+  str_detect(name, "(?i)Nexlizet") ~ "Nexlizet",
+  str_detect(name, "(?i)Ranexa") ~ "Ranexa",
+  str_detect(name, "(?i)Adempas") ~ "Adempas",
+  str_detect(name, "(?i)Vyndaqel") ~ "Vyndaqel",
+  str_detect(name, "(?i)Humira|(?i)Adalimumab") ~ "Humira",
+  str_detect(name, "(?i)Dupixent|(?i)Dupilumab") ~ "Dupixent",
+  str_detect(name, "(?i)Botox") ~ "Botox",
+  str_detect(name, "(?i)cosentyx|(?i)secukinumab") ~ "Cosentyx",
+  str_detect(name, "(?i)Aimovig|(?i)Erenumab") ~ "Aimovig",
+  str_detect(name, "(?i)Abilify") ~ "Abilify",
+  str_detect(name, "(?i)Latuda") ~ "Latuda",
+  str_detect(name, "(?i)Brilinta") ~ "Brilinta",
+  str_detect(name, "(?i)Bydureon") ~ "Bydureon",
+  str_detect(name, "(?i)Invokana") ~ "Invokana",
+  str_detect(name, "(?i)Rexulti") ~ "Rexulti",
+  str_detect(name, "(?i)Repatha") ~ "Repatha",
+  str_detect(name, "(?i)Acthar") ~ "Acthar",
+  str_detect(name, "(?i)Aubagio") ~ "Aubagio",
+  str_detect(name, "(?i)Trulicity") ~ "Trulicity",
+  str_detect(name, "(?i)Keytruda") ~ "Keytruda",
+  TRUE ~ name
+  ))
+
+
+#Group by type and name and get top 20
+drugfig_df <- drugfig_df %>% 
+filter(name != "") %>% #Filter out those with blank names (indicates non-drug payments)
+group_by(name) %>% #Group by drug
+summarise(amount = (sum(amount))/1000000) %>% #Calculate total per drug and divide by 1 million
+arrange(-amount) %>% #Arrange in descending order
+slice(1:25) #Get the top 25
+
+#Capitalize only first letters
+drugfig_df$name <- drugfig_df$name %>% str_to_title
+
+#Reorder drugs according to amount
+drugfig_df$name <- fct_reorder(drugfig_df$name, -drugfig_df$amount)
+
+#Add label to display on top of bars
+drugfig_df$label <- paste0( (drugfig_df$amount) %>% round(1) %>%
+format(nsmall = 1)) %>% str_trim
+
+#Convert to data.table
+drugfig_df <- drugfig_df %>% data.table
+
+#Plot
+drugs_fig <- ggplot(data = drugfig_df,
+                    aes(x = name, y = amount)) +
+#Bars and their fill
+geom_bar(stat = "identity",  color = "black", fill = "lightblue", lwd = 1/scale_down) +
+#Add label on top
+geom_text(hjust = "center",
+          nudge_y = 0.6,
+          size = 10/scale_down,
+          aes(label = label,
+              fontface = "bold")) +
+#Add title
+ggtitle("Top 25 drugs related to industry payments in the US, August 2013 to December 2022",
+            subtitle = "These numbers do not include acquisitions of entities owned by physicians, loans for medical products, royalty or licensing fees, or debt forgiveness payments.") +
+#Add scales
+scale_x_discrete(name = "Drug") +
+scale_y_continuous(
+  name = "Total value of payments (million USD)",
+  expand = c(0, 0),
+  limits = c(0, 500),
+  trans = "sqrt",
+  breaks = c(0, 5, 20, 50, 100, 200, 300, 350)
+) +
+#Theme elements
+theme_pubclean() +
+theme(text = element_text(size = 18/scale_down),
+      plot.title=element_text(face = "bold", hjust = 0.0, size = 28/scale_down),
+  plot.subtitle = element_text(face = "bold", size = 0/scale_down, hjust = 0.0, color = "grey45"),
+  axis.text.x = element_text(size = 20/scale_down, face = "bold", angle = 45, vjust
+                             = 1, hjust = 1),
+  axis.text.y = element_text(size = 20/scale_down, face = "bold"),
+  axis.title.x = element_blank(),
+  axis.title.y = element_text(size = 22/scale_down, face = "bold"),
+  axis.line = element_line(colour = "black", linewidth = 2/scale_down),
+  legend.text = element_text(size = 25/scale_down, face = "bold"),
+  legend.title = element_text(size = 30/scale_down, face = "bold"),
+  legend.position = c(0.5, 0.98),
+  plot.margin = margin(0.5, 1, 0.5, 1, "cm")/scale_down,
+  legend.key.width = unit(6, "mm"),
+  legend.key.height = unit(6, "mm"),
+  legend.background = element_rect(fill = "transparent")) +
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE,
+  title.position = "left")) 
+
+```
+
+# Create Figure 1B (Devices)
+
+```{r, fig.width = 16, fig.height = 9,  message = FALSE, warning = FALSE}
+#Scale down the size of the figure (to fit it into a 2-figure panel)
+scale_down = 2
+#This will load the source code for unifying device names that may be referred to using more than a single term
+
+#This code is divided into 2 sections. First, names which are too non-specific are removed. Then, devices which may be referred to by more than 1 name are combined
+devfig_df <- devices %>%
+  #Remove non-specific names
+  filter(!name %in% c("OTHER", "Vascular", "Spine", 
+                      "CRM", "HIPS", "Heart Valves",
+                      "OTHER- BSC PRODUCT NOT LISTED",
+                      "CLINICAL TRIAL PRODUCT",
+                      "TRAUMA & EXTREMITIES",
+                      "OTHER - MISCELLANEOUS",
+                      "Neuro-Chronic Pain",
+                      "Thoracolumbar - TL Therapies",
+                      "Spinal Cord Neurostimulation - Neuro",
+                      "Trauma",
+                      "Sports Medicine",
+                      "Knees",
+                      "Orthopedics",
+                      "Stents",
+                      "Recon Knees",
+                      "Atherectomy Device",
+                      "Bradycardia products",
+                      "PAIN MANAGEMENT",
+                      "ThoracoLumbar",
+                      "Joint Implants",
+                      "Transcatheter Heart Valves",
+                      "Surgical",
+                      "OtherNA")) %>%
+  #Combine devices referred to by more than 1 name
+  filter(name != "" & !(name %>% str_detect("GENERAL") & name %>% str_detect("THERAPIES"))) %>%
+  mutate(name = case_when(
+    str_detect(name, "(?i)SAPIEN 3") ~ "Sapien 3",
+    str_detect(name, "(?i)IFUSE Implant") ~ "iFUSE Implant System",
+    str_detect(name, "(?i)Equinoxe") ~ "Equinoxe Platform System",
+    str_detect(name, "(?i)Attune") ~ "ATTUNE Knee System",
+    str_detect(name, "(?i)Mako") ~ "Mako SmartRobotics",
+    str_detect(name, "(?i)Da vinci|(?i)davinci|(?i)Da Vinci") ~ "da Vinci Surgical System",
+    str_detect(name, "(?i)IMPELLA") ~ "Impella",
+    str_detect(name, "(?i)corevalve evolut") ~ "CoreValve Evolut",
+    str_detect(name, "(?i)Watchman") ~ "Watchman",
+    str_detect(name, "(?i)LifeVest") ~ "LifeVest", 
+    str_detect(name, "(?i)Carto 3|(?i)Carto-3") ~ "Carto 3",
+    str_detect(name, "(?i)SQ-RX|(?i)SQ RX|(?i)SQRX") ~ "SQ-RX",
+    str_detect(name, "(?i)CardioMEMS|(?i)Cardio MEMS|(?i)Cardio-MEMS") ~ "CardioMEMS",
+    str_detect(name, "(?i)Xience V|(?i)XienceV|(?i)Xience-V") ~ "Xience V",
+    str_detect(name, "(?i)Mitra Clip|(?i)MitraClip|(?i)Mitra-Clip") ~ "MitraClip",
+    str_detect(name, "(?i)Arctic Front|(?i)ArcticFront|(?i)Arctic-Front") ~ "Arctic Front",
+    str_detect(name, "(?i)Coronary orbital atherectomy") ~ "Coronary orbital atherectomy",
+    str_detect(name, "(?i)Micra") ~ "Micra",
+    str_detect(name, "(?i)Resolute") ~ "Resolute",
+    str_detect(name, "(?i)xlif") ~ "XLIF",
+    str_detect(name, "(?i)Senza spinal cord") ~ "Senza Spinal Cord Stimulation",
+    str_detect(name, "(?i)SIR-SPHERES MICROSPHERES") ~ "SIR-Spheres microspheres",
+    str_detect(name, "(?i)^senza") ~ "Senza Spinal Cord Stimulation System",
+    str_detect(name, "(?i)^cd horizon") ~ "CD Horizon Spinal System",
+    str_detect(name, "(?i)^natrelle") ~ "Natrelle Implants",
+    str_detect(name, "(?i)^endurant") ~ "Endurant stents",
+    str_detect(name, "(?i)^expedium") ~ "Expedium Spine System",
+    str_detect(name, "(?i)^accolade") ~ "Accolade pacing systems",
+    str_detect(name, "(?i)Definity") ~ "Definity",
+    str_detect(name, "(?i)Urolift|(?i)UroLift") ~ "UroLift",
+    str_detect(name, "(?i)Web aneurysm|(?i) Web embol") ~ "Web Embolization System",
+    str_detect(name, "(?i)Proclaim") ~ "PROCLAIM",
+    str_detect(name, "(?i)DJO Surg") ~ "DJO Surgical",
+    str_detect(name, "(?i)Shockwave IVL") ~ "Shockwave IVL System",
+    str_detect(name, "(?i)Flowtriever") ~ "Flowtriever",
+    str_detect(name, "(?i)Indigo System") ~ "Indigo System",
+    str_detect(name, "(?i)Mazor") ~ "Mazor System",
+    str_detect(name, "(?i)Intellis") ~ "Intellis System",
+    str_detect(name, "(?i)ROSA") ~ "Rosa System",
+    str_detect(name, "(?i)Acessa") ~ "Acessa",
+    str_detect(name, "(?i)Epi-sense") ~ "EPi-Sense System",
+    str_detect(name, "(?i)Arthrex") ~ "Arthrex Devices",
+    str_detect(name, "(?i)Alloderm") ~ "AlloDerm",
+    str_detect(name, "^(?i)Titan |^(?i)Titan$") ~ "Titan",
+    str_detect(name, "^(?i)miloop") ~ "miLOOP",
+    TRUE ~ name)
+  )
+
+
+#Group by type and name and get top 20
+devfig_df <- devfig_df %>% 
+  group_by(name) %>% #Group by device
+  summarise(amount = (sum(amount))/1000000) %>% #Calculate total per device and divide by 1 million
+  arrange(-amount) %>% #Arrange in descending order
+  slice(1:25) #Get the top 25
+
+#Add label
+devfig_df$label <- paste0((devfig_df$amount) %>% round(1) %>% format(nsmall = 1)) %>% str_trim
+
+
+#Reorder factor according to amount
+devfig_df$name <- fct_reorder(devfig_df$name, -devfig_df$amount)
+
+
+#Convert to data.talbe
+devfig_df <- devfig_df %>% data.table
+
+#Plot
+devfig <- ggplot(data = devfig_df,
+       aes(x = name,
+           y = amount)) +
+  #Bars and their fill
+  geom_bar(stat = "identity",  color = "black", fill = "salmon", lwd = 1/scale_down) +
+  #Add label on top
+  geom_text(hjust = "center",
+            nudge_y = 0.7,
+             size = 10/scale_down,
+             aes(label = label,
+                 fontface = "bold")) +
+  #Add title
+  ggtitle("Top 25 medical devices related to industry payments in the US, August 2013 to December 2022") +
+  #Add scales
+  scale_x_discrete(
+    name = "Device"
+  ) +
+  scale_y_continuous(
+    name = "Total value of payments (million USD)",
+    expand = c(0, 0),
+    limits = c(0, 500),
+    trans = "sqrt",
+    breaks = c(0, 5, 20, 50, 100, 200, 300, 350)
+  ) +
+  #Theme elements
+  theme_pubclean() +
+  theme(text = element_text(size = 18/scale_down),
+        plot.title=element_text(face = "bold", hjust = 0.0, size = 28/scale_down),
+        plot.subtitle = element_text(face = "bold", size = 0/scale_down, hjust = 0.0, color = "grey45"),
+        axis.text.x = element_text(size = 15/scale_down, face = "bold", angle = 45, vjust = 1, hjust = 1),
+        axis.text.y = element_text(size = 20/scale_down, face = "bold"),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 22/scale_down, face = "bold"),
+        axis.line = element_line(colour = "black", size = 2/scale_down),
+        legend.text = element_text(size = 25/scale_down, face = "bold"),
+        legend.title = element_text(size = 30/scale_down, face = "bold"),
+        legend.position = c(0.5, 0.95),
+        plot.margin = margin(0.5, 1, 0.5, 1, "cm")/scale_down,
+        legend.key.width = unit(6, "mm"),
+        legend.key.height = unit(6, "mm"),
+        legend.background = element_rect(fill = "transparent")) +
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE,
+                             title.position = "left")) 
+```
+
+# Results:
+
+From 2013 to 2022, `r comma(total_payments)` payments with a total value of \$`r round(total_amount/10^9, 2)` billion were made by industry to `r comma(total_physicians_receiving_payments)` out of `r comma(total_physicians)` eligible physicians (% receiving payments: `r total_physicians_receiving_payments_prop`%; median \$`r q_amount[2]` per physician, IQR, \$`r q_amount[1]` - \$`r q_amount[3]`). `r comma(product_related_division[1,2])` (`r product_related_division[1,3]`%) of these payments were made in relation to 1 or more medical products. The total value of payments was highest in 2019 (\$`r round(amount_year[year == 2019, amount/10^9], 2)` billion) and lowest in 2020 (\$`r round(amount_year[year == 2020, amount/10^6], 2)` million). Additionally, the number of physicians receiving payments was highest in 2015 (`r physicians_paid_by_year[year == 2015, comma(physicians_paid_n)]`) and lowest in 2020 (`r physicians_paid_by_year[year == 2020, comma(physicians_paid_n)]`). The total value of payments changed from \$`r round(amount_year[year == 2014, amount/10^9], 2)` billion (to `r physicians_paid_by_year[year == 2014, comma(physicians_paid_n)]` physicians) in 2014 to \$`r round(amount_year[year == 2022, amount/10^9], 2)` billion (to `r physicians_paid_by_year[year == 2022, comma(physicians_paid_n)]` physicians) in 2022.
+
+Orthopedic surgeons received the greatest sum of payments at \$`r round(sp_data[sp_full == "Orthopedics", amount/10^9], 2)` billion, followed by neurologists & psychiatrists at \$`r round(sp_data[sp_full == "Neurology & Psychiatry", amount/10^9], 2)` billion, and cardiologists at \$`r round(sp_data[sp_full == "Cardiology", amount/10^9], 2)` billion. Pediatric surgeons (\$`r round(sp_data[sp_full == "Pediatric Surgery", amount/10^6], 2)` million) and Trauma surgeons (\$`r round(sp_data[sp_full == "Trauma Surgery", amount/10^6], 2)` million) received the lowest sum of payments. Within each specialty, payment distributions were skewed with payments to the median physician ranging from \$`r comma(round(range(word(sp_data$median_iqr, 1) %>% as.numeric %>% range)[1] %>% as.numeric, 0))` to \$`r comma(round(range(word(sp_data$median_iqr, 1) %>% as.numeric %>% range)[2] %>% as.numeric, 0))` whereas the mean amount paid to the top 0.1% of physicians ranged from \$`r comma(round(range(sp_data$top0.1mean)[1], 0))` in the case of hospitalists to \$`r comma(round(range(sp_data$top0.1mean)[2], 0))` in the case of orthopedic surgeons. Payment details by specialty and year are shown in the **Table**.
+
+The top 25 drugs and devices associated with payments are shown in the **Figure**. The 3 drugs associated with the most payments were `r drugfig_df[1,"name"]` (\$`r drugfig_df[1, round(amount, 2)]` million), `r drugfig_df[2,"name"]` (\$`r drugfig_df[2, round(amount, 2)]` million), and `r drugfig_df[3,"name"]` (\$`r drugfig_df[3, round(amount, 2)]` million). The 3 devices associated with the most payments were `r devfig_df[1, "name"]` (\$`r devfig_df[1, round(amount, 2)]` million), `r devfig_df[2, "name"]` (\$`r devfig_df[2, round(amount, 2)]` m), and `r devfig_df[3, "name"]` (\$`r devfig_df[3, round(amount, 2)]` million).
+
+# Display Table
+
+```{r}
+#Table
+t
+```
+
+# Merge Figure 1A & Figure 1B & Display them
+
+```{r, fig.width = 16, fig.height = 9,  message = FALSE, warning = FALSE}
+#Figure 1
+ggarrange(drugs_fig, devfig,
+          labels = c("[A]","[B]"),
+          nrow = 2, ncol = 1)
+#Use a single horizontal line as a separator
+grid_single_horizontal()
+
+```
+
+# Save the Figure
+
+```{r output = FALSE}
+#Figure 1
+ggarrange(drugs_fig, devfig,
+          labels = c("[A]","[B]"),
+          nrow = 2, ncol = 1)
+#Use a single horizontal line as a separator
+grid_single_horizontal()
+fig1 <- grid.grab()
+#Save the file
+ggsave(fig1,
+       filename = paste0("Figure.pdf"),
+       width = 16,
+       height = 9,
+       dpi = 600)
+```
