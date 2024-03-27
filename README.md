@@ -6,14 +6,14 @@ These files, in combination with the freely and publicly available Open Payments
 2) The "Specialties Taxonomy" file contains the data needed to map the 231 provider specialties provided in the Open Payments file to a simplified 39-category classification.
 3) Aside from these 2 files, we need a few others hosted by CMS:
 
-        1) The Open Payments data:
+1) The Open Payments data:
                1) 2013-2015 (Please rename to "General_Payments_XXXX", where XXXX is year (2013/2014/2015), once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/archived-datasets
 
-               2) 2016-2022 (Please rename to "General_Payments_XXXX", where XXXX is year (2016-2022), once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/dataset-downloads
+2) 2016-2022 (Please rename to "General_Payments_XXXX", where XXXX is year (2016-2022), once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/dataset-downloads
 
-               3) The "Covered Recipient Supplement File for all Program Years" file. This file contains the data needed to match open payments IDs to National Provider Identifiers (NPIs) It can also be found at the same link as the 2016-2022 files (Please rename to "Provider_Info.csv" once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/dataset-downloads
+3) The "Covered Recipient Supplement File for all Program Years" file. This file contains the data needed to match open payments IDs to National Provider Identifiers (NPIs) It can also be found at the same link as the 2016-2022 files (Please rename to "Provider_Info.csv" once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/dataset-downloads
 
-       2) The NPI files hosted by CMS, a registry of physcians in the US along with their corresponding NPI (please rename to "NPI File.csv" once downloaded): https://download.cms.gov/nppes/NPI_Files.html
+2) The NPI files hosted by CMS, a registry of physcians in the US along with their corresponding NPI (please rename to "NPI File.csv" once downloaded): https://download.cms.gov/nppes/NPI_Files.html
 
 The renaming of files is only necessary to allow the R code to run seamlessly without you having to change the file names in the Quarto file yourself.
 
