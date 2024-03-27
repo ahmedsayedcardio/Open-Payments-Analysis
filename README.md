@@ -9,9 +9,9 @@ These files, in combination with the freely and publicly available Open Payments
     1) The Open Payments data:
                    
 
-        1) 2013-2015 (Please rename to "General_Payments_XXXX", where XXXX is year (2013/2014/2015), once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/archived-datasets
+        1) 2013-2015 (Please rename to "General_Payments_XXXX.csv", where XXXX is year (2013/2014/2015), once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/archived-datasets
     
-        2) 2016-2022 (Please rename to "General_Payments_XXXX", where XXXX is year (2016-2022), once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/dataset-downloads
+        2) 2016-2022 (Please rename to "General_Payments_XXXX.csv", where XXXX is year (2016-2022), once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/dataset-downloads
     
     3) The "Covered Recipient Supplement File for all Program Years" file. This file contains the data needed to match open payments IDs to National Provider Identifiers (NPIs). It can be found at the same link as the 2016-2022 files (Please rename to "Provider_Info.csv" once downloaded): https://www.cms.gov/priorities/key-initiatives/open-payments/data/dataset-downloads
     
