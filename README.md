@@ -1,4 +1,4 @@
-These files, in combination with the freely and publicly available Open Payments files (https://openpaymentsdata.cms.gov/datasets), can be used to recreate the results presented in Industry Payments to US Physicians by Specialty and Product Type", by Ahmed Sayed et al. (DOI: 10.1001/jama.2024.1989).
+These files, in combination with the freely and publicly available Open Payments files (https://openpaymentsdata.cms.gov/datasets), can be used to recreate the results presented in Industry Payments to US Physicians by Specialty and Product Type", by Ahmed Sayed et al. (https://jamanetwork.com/journals/jama/fullarticle/2816900).
 
 **A Brief Overview of the Files & Their Structure:**
 
