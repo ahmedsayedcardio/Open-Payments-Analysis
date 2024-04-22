@@ -20,3 +20,4 @@ These files, in combination with the freely and publicly available Open Payments
 The renaming of files is only necessary to allow the R code to run seamlessly without you having to change the file names in the Quarto file yourself.
 
 If you have any questions related to the analysis or the code, please feel free to contact me (Ahmed Sayed) at the following email: asu.ahmed.sayed@gmail.com
+This analysis has been published: https://jamanetwork.com/journals/jama/article-abstract/2816900
